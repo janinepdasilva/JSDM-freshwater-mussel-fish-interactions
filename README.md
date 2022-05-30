@@ -35,7 +35,7 @@ freq_S
 
 P = as.data.frame(colMeans(YData > 0))
 
-# x- and y-coordinates of sampling sites. We store these as the xy-matrix to be able to fit a spatial model
+#x- and y-coordinates of sampling sites. We store these as the xy-matrix to be able to fit a spatial model
 
 xy <- as.matrix(cbind(data$X, data$Y))
 
@@ -46,13 +46,13 @@ par(mfrow=c(1,1))
 plot(xy, asp=1) # show the map (NB., equal aspect ratio in the map)
 
 
-# The data that we will utilize for the Hmsc model consist of the community data matrix Y,
-# the environmental data frame XData,
-# the coordinates of the sampling locations xy,
-# but could also include the species trait data frame TrData,
-# and the phylogenetic tree PhyloTree.
+#The data that we will utilize for the Hmsc model consist of the community data matrix Y,
+#the environmental data frame XData,
+#the coordinates of the sampling locations xy,
+#but could also include the species trait data frame TrData,
+#and the phylogenetic tree PhyloTree.
 
-# To define a spatial random effect at the level of the route, we need to include the river ID in the studyDesign
+#To define a spatial random effect at the level of the route, we need to include the river ID in the studyDesign
 
 studyDesign <- data.frame(as.factor(data$HYRIV_ID))
 colnames(studyDesign) <- c("HYRIV_ID")
@@ -158,7 +158,7 @@ plotBeta(models[[1]], post=postBeta, supportLevel = 0.95, param = "Sign", plotTr
          covNamesNumbers = c(TRUE, FALSE), colors = colorRampPalette(c("grey","white","black")), colorLevels = 3)
 
 
-# species associations revealed by the random effects with the corrplot function
+#species associations revealed by the random effects with the corrplot function
 par(mfrow = c(1,2))
 #Model FULL - residual associations that account for the responses of species to environmental conditions
 library(corrplot)
