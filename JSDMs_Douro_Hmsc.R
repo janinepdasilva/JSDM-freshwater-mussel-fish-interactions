@@ -63,41 +63,41 @@ transient = 500*thin
 #Model space includes the spatial random effect but no environmental covariates. No species traits and phylogenetic relationships.
 
 XFormula = ~ tmp_dc_cmx + ele_mt_cav + pre_mm_cyr + ORD_STRA + crp_pc_use + S_CaCO3_av
-m.FULL = Hmsc(Y = YData, XData = XData, XFormula = XFormula,
+m_FULL = Hmsc(Y = YData, XData = XData, XFormula = XFormula,
               distr = "probit",
               studyDesign = studyDesign,
               ranLevels = list(HYRIV_ID=rL))
 
 
-m.SPACE = Hmsc(Y = YData, XData = XData, XFormula = ~1,
+m_SPACE = Hmsc(Y = YData, XData = XData, XFormula = ~1,
                distr = "probit",
                studyDesign = studyDesign,
                ranLevels = list(HYRIV_ID= rL))
 
-m.ENV = Hmsc(Y = YData, XData = XData, XFormula = XFormula, 
+m_ENV = Hmsc(Y = YData, XData = XData, XFormula = XFormula, 
              distr = "probit")
 
 
-m.FULL
-m.SPACE
-m.ENV
+m_FULL
+m_SPACE
+m_ENV
 
 
 ################################################################################
 #FIT MODELS
 
 #Combine the three models
-# models_description <- list(m.FULL, m.SPACE, m.ENV)
-models_MCMC <- list()
+# models_description <- list(m_FULL, m_SPACE, m_ENV)
+models_fitted <- list()
 # for (i in 1:length(models)) {
-#   models_MCMC[[i]] = sampleMcmc(models_description[[i]], thin = thin, samples = samples, transient = transient, nChains = nChains)
+#   models_fitted[[i]] = sampleMcmc(models_description[[i]], thin = thin, samples = samples, transient = transient, nChains = nChains, nParallel = 3)
 #   }
-models_MCMC[[1]] = sampleMcmc(m.ENV, thin = thin, samples = samples, transient = transient, nChains = nChains, nParallel = 3)
+models_fitted[[1]] = sampleMcmc(m_ENV, thin = thin, samples = samples, transient = transient, nChains = nChains, nParallel = 3)
 
 
 #Examine MCMC convergence
-mpost <- convertToCodaObject(models_MCMC[[1]], spNamesNumbers = c(T,F), covNamesNumbers = c(T,F))
-psrf.beta <- gelman.diag(mpost$Beta, multivariate = FALSE)$psrf
+mpost <- convertToCodaObject(models_fitted[[1]], spNamesNumbers = c(T,F), covNamesNumbers = c(T,F))
+psrf_beta <- gelman.diag(mpost$Beta, multivariate = FALSE)$psrf
 tmp <- mpost$Omega[[1]]
 z <- dim(tmp[[1]]) [2]
 
@@ -105,53 +105,112 @@ for (i in 1:length(tmp)) {
   tmp[[i]] = tmp[[i]]
   }
 
-psrf.omega <- gelman.diag(tmp, multivariate = FALSE)$psrf
+psrf_omega <- gelman.diag(tmp, multivariate = FALSE)$psrf
 par(mfrow=c(1,2))
 
-hist(psrf.beta, xlab = expression(paste("Potential reduction factor (parameter ", beta, ")")))
-hist(psrf.omega, xlab = expression(paste("Potential reduction factor (parameter ", Omega, ")")))
+hist(psrf_beta, xlab = expression(paste("Potential reduction factor (parameter ", beta, ")")))
+hist(psrf_omega, xlab = expression(paste("Potential reduction factor (parameter ", Omega, ")")))
 
 
 
 #########################################################################################
 #EVALUATING MODEL FIT AND COMPARING MODELS
-partition = createPartition(models_MCMC[[1]], nfolds = 2, column = "HYRIV_ID")
+partition = createPartition(models_fitted[[1]], nfolds = 2, column = "HYRIV_ID")
 MF = list()
 MFCV = list()
 for (i in 1:2){
-   preds = computePredictedValues(models_MCMC[[i]])
-   MF[[i]] = evaluateModelFit(hM = models_MCMC[[i]], predY = preds)
-   preds = computePredictedValues(models_MCMC[[i]], partition = partition)
-   MFCV[[i]] = evaluateModelFit(hM = models_MCMC[[i]], predY = preds)
+   preds = computePredictedValues(models_fitted[[i]])
+   MF[[i]] = evaluateModelFit(hM = models_fitted[[i]], predY = preds)
+   preds = computePredictedValues(models_fitted[[i]], partition = partition)
+   MFCV[[i]] = evaluateModelFit(hM = models_fitted[[i]], predY = preds)
    }
 
 
-WAIC = unlist(lapply(models_MCMC, FUN = computeWAIC))
+WAIC = unlist(lapply(models_fitted, FUN = computeWAIC))
 WAIC = as.data.frame(WAIC)
+
+
+################################################################################
+#Calculate between species correlation due to environmental covariates. Note this is done based on the posterior distribution of the species-specific regression coefficients, as opposed to being based on the prior distribution [which then be proportion to V]
+
+calc_Xcor <- function(codasamples, model, est = "mean", prob = 0.95) {
+   num_spp <- ncol(model$Y)
+   all_Beta_samples <- do.call(rbind.data.frame, codasamples$Beta)
+   num_mcmc <- nrow(all_Beta_samples)
+   Xmatrix <- model$XScaled
+   
+   enviro_cor_mat <- enviro_cor_mat_cilower <- enviro_cor_mat_ciupper <- enviro_cov_mat <- sig_enviro_cor_mat <- matrix(0, num_spp, num_spp)
+   rownames(enviro_cor_mat) <- rownames(enviro_cor_mat_cilower) <- rownames(enviro_cor_mat_ciupper) <- rownames(enviro_cov_mat) <- rownames(sig_enviro_cor_mat) <- colnames(model$Y)
+  colnames(enviro_cor_mat) <- colnames(enviro_cor_mat_cilower) <- colnames(enviro_cor_mat_ciupper) <- colnames(enviro_cov_mat) <- colnames(sig_enviro_cor_mat) <- colnames(model$Y)
+   all_cors <- array(NA, dim = c(num_spp, num_spp, num_mcmc))
+   
+   message("Calculating (posterior) between species correlation matrix due to measured covariates...")
+   pb <- txtProgressBar(initial = 0, max = num_mcmc, style =3) 
+
+   for(k0 in 1:num_mcmc) {
+      cw_Beta <- matrix(as.vector(unlist(all_Beta_samples[k0,])), nrow = num_spp, byrow = TRUE)
+      rownames(cw_Beta) <- colnames(model$Y)
+      colnames(cw_Beta) <- colnames(model$XScaled)
+      
+      all_cors[,,k0] <- cor(tcrossprod(as.matrix(Xmatrix), cw_Beta))
+      setTxtProgressBar(pb, k0)
+      } 
+   close(pb)
+   
+   for(j in 1:num_spp) {
+      for(j2 in 1:num_spp) { ## Average/Median over the MCMC samples
+         if(est == "median") {
+            enviro_cov_mat[j, j2] <- median(all_cors[j, j2, ])
+            enviro_cor_mat[j, j2] <- median(all_cors[j, j2, ])
+            }
+         if(est == "mean") {
+            enviro_cov_mat[j, j2] <- mean(all_cors[j, j2, ])
+            enviro_cor_mat[j, j2] <- mean(all_cors[j, j2, ])
+            }
+
+         sig_enviro_cor_mat[j, j2] <- enviro_cor_mat[j, j2]
+         get.hpd.cors <- HPDinterval(as.mcmc(all_cors[j, j2,]), prob = prob)
+         enviro_cor_mat_cilower[j, j2] <- get.hpd.cors[1]
+         enviro_cor_mat_ciupper[j, j2] <- get.hpd.cors[2]
+         if(0 > get.hpd.cors[1] & 0 < get.hpd.cors[2]) {
+            sig_enviro_cor_mat[j, j2] <- 0
+            }
+         }
+   }
+
+  return(list(cor = enviro_cor_mat, 
+              cor_lower = enviro_cor_mat_cilower, 
+              cor_upper = enviro_cor_mat_ciupper, 
+              sig_cor = sig_enviro_cor_mat))
+   }   
+
+
+Xcorrelations_ENV <- calc_Xcor(codasamples = convertToCodaObject(models_fitted[[1]], spNamesNumbers = c(T,F), covNamesNumbers = c(T,F)),
+                               model = m_ENV)
 
 
 #########################################################################################
 #Exploring Parameter estimates
 VP = list()
-for (i in 1:length(models_MCMC)) {
-  VP[[i]] = computeVariancePartitioning(models_MCMC[[i]])
+for (i in 1:length(models_fitted)) {
+  VP[[i]] = computeVariancePartitioning(models_fitted[[i]])
   }
-
+   
 
 #Plot Variance partitioning with Hmsc
-plotVariancePartitioning(models_MCMC[[1]], VP[[1]], args.legend = list(x = "topright", bty = "n", inset=c(-0.15, 0)))
+plotVariancePartitioning(models_fitted[[1]], VP[[1]], args.legend = list(x = "topright", bty = "n", inset=c(-0.15, 0)))
 
 
 #Plot heatmap
-postBeta <- getPostEstimate(models_MCMC[[1]], parName = "Beta")
-plotBeta(models_MCMC[[1]], post=postBeta, supportLevel = 0.95, param = "Sign", plotTree = FALSE, spNamesNumbers = c(TRUE, FALSE), 
+postBeta <- getPostEstimate(models_fitted[[1]], parName = "Beta")
+plotBeta(models_fitted[[1]], post=postBeta, supportLevel = 0.95, param = "Sign", plotTree = FALSE, spNamesNumbers = c(TRUE, FALSE), 
          covNamesNumbers = c(TRUE, FALSE), colors = colorRampPalette(c("grey","white","black")), colorLevels = 3)
 
 
 # species associations revealed by the random effects with the corrplot function
 par(mfrow = c(1,2))
 #Model FULL - residual associations that account for the responses of species to environmental conditions
-OmegaCor = computeAssociations(models_MCMC[[1]])
+OmegaCor = computeAssociations(models_fitted[[1]])
 supportLevel = 0.85
 toPlot = ((OmegaCor[[1]]$support>supportLevel)
           + (OmegaCor[[1]]$support<(1-supportLevel))>0)*OmegaCor[[1]]$mean
@@ -162,7 +221,7 @@ corrplot(toPlot, method="color", type = "lower", tl.srt = 45, col=c("grey", "whi
 
 
 #Model SPATIAL raw associations
-OmegaCor = computeAssociations(models_MCMC[[2]])
+OmegaCor = computeAssociations(models_fitted[[2]])
 supportLevel = 0.85
 toPlot = ((OmegaCor[[1]]$support>supportLevel)
           + (OmegaCor[[1]]$support<(1-supportLevel))>0)*OmegaCor[[1]]$mean
