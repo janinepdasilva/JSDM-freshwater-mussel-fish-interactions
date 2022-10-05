@@ -194,6 +194,9 @@ Xcorrelations_ENV <- calc_Xcor(codasamples = convertToCodaObject(models_fitted[[
                                model = m_ENV)
 
 
+supportLevel = 0.95
+toPlot = ((Xcorrelations_ENV$support > supportLevel)
+          + (Xcorrelations_ENV$support < (1-supportLevel))>0) * Xcorrelations_ENV$cor
 
 
 #########################################################################################
