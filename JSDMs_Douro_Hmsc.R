@@ -139,24 +139,26 @@ calc_Xcor <- function(codasamples, model, est = "mean", prob = 0.95) {
    num_mcmc <- nrow(all_Beta_samples)
    Xmatrix <- model$XScaled
    
-   enviro_cor_mat <- enviro_cor_mat_cilower <- enviro_cor_mat_ciupper <- enviro_cov_mat <- sig_enviro_cor_mat <- matrix(0, num_spp, num_spp)
-   rownames(enviro_cor_mat) <- rownames(enviro_cor_mat_cilower) <- rownames(enviro_cor_mat_ciupper) <- rownames(enviro_cov_mat) <- rownames(sig_enviro_cor_mat) <- colnames(model$Y)
-  colnames(enviro_cor_mat) <- colnames(enviro_cor_mat_cilower) <- colnames(enviro_cor_mat_ciupper) <- colnames(enviro_cov_mat) <- colnames(sig_enviro_cor_mat) <- colnames(model$Y)
-   all_cors <- array(NA, dim = c(num_spp, num_spp, num_mcmc))
+   enviro_cor_mat <- enviro_cor_mat_cilower <- enviro_cor_mat_ciupper <- enviro_cov_mat <- sig_enviro_cor_mat <- enviro_cor_support_mat <- matrix(0, num_spp, num_spp)
+   rownames(enviro_cor_mat) <- rownames(enviro_cor_mat_cilower) <- rownames(enviro_cor_mat_ciupper) <- rownames(enviro_cov_mat) <- rownames(sig_enviro_cor_mat) <- rownames(enviro_cor_support_mat) <- colnames(model$Y)
+  colnames(enviro_cor_mat) <- colnames(enviro_cor_mat_cilower) <- colnames(enviro_cor_mat_ciupper) <- colnames(enviro_cov_mat) <- colnames(sig_enviro_cor_mat) <- colnames(enviro_cor_support_mat) <- colnames(model$Y)
+   all_cors <- all_support <- array(NA, dim = c(num_spp, num_spp, num_mcmc))
    
    message("Calculating (posterior) between species correlation matrix due to measured covariates...")
    pb <- txtProgressBar(initial = 0, max = num_mcmc, style =3) 
 
+   
    for(k0 in 1:num_mcmc) {
       cw_Beta <- matrix(as.vector(unlist(all_Beta_samples[k0,])), nrow = num_spp, byrow = TRUE)
       rownames(cw_Beta) <- colnames(model$Y)
       colnames(cw_Beta) <- colnames(model$XScaled)
       
       all_cors[,,k0] <- cor(tcrossprod(as.matrix(Xmatrix), cw_Beta))
+      all_support[,,k0] <- all_cors[,,k0] > 0
       setTxtProgressBar(pb, k0)
       } 
    close(pb)
-   
+    
    for(j in 1:num_spp) {
       for(j2 in 1:num_spp) { ## Average/Median over the MCMC samples
          if(est == "median") {
@@ -167,7 +169,7 @@ calc_Xcor <- function(codasamples, model, est = "mean", prob = 0.95) {
             enviro_cov_mat[j, j2] <- mean(all_cors[j, j2, ])
             enviro_cor_mat[j, j2] <- mean(all_cors[j, j2, ])
             }
-
+         
          sig_enviro_cor_mat[j, j2] <- enviro_cor_mat[j, j2]
          get.hpd.cors <- HPDinterval(as.mcmc(all_cors[j, j2,]), prob = prob)
          enviro_cor_mat_cilower[j, j2] <- get.hpd.cors[1]
@@ -175,18 +177,26 @@ calc_Xcor <- function(codasamples, model, est = "mean", prob = 0.95) {
          if(0 > get.hpd.cors[1] & 0 < get.hpd.cors[2]) {
             sig_enviro_cor_mat[j, j2] <- 0
             }
+         
+         enviro_cor_support_mat[j, j2] <- mean(all_support[j, j2, ])
          }
    }
 
   return(list(cor = enviro_cor_mat, 
               cor_lower = enviro_cor_mat_cilower, 
               cor_upper = enviro_cor_mat_ciupper, 
-              sig_cor = sig_enviro_cor_mat))
+              sig_cor = sig_enviro_cor_mat,
+              support = enviro_cor_support_mat))
    }   
 
 
 Xcorrelations_ENV <- calc_Xcor(codasamples = convertToCodaObject(models_fitted[[1]], spNamesNumbers = c(T,F), covNamesNumbers = c(T,F)),
                                model = m_ENV)
+
+
+supportLevel = 0.95
+toPlot = ((Xcorrelations_ENV$support > supportLevel)
+          + (Xcorrelations_ENV$support < (1-supportLevel))>0) * Xcorrelations_ENV$cor
 
 
 #########################################################################################
